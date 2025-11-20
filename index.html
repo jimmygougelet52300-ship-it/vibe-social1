@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VIBE - Réseau Social Éphémère</title>
+    <title>Vibe Social</title>
     <style>
         :root {
             --primary: #6c5ce7;
@@ -12,7 +12,7 @@
             --dark: #2d3436;
         }
         body {
-            font-family: 'Poppins', sans-serif;
+            font-family: Arial, sans-serif;
             background: var(--light);
             margin: 0;
             padding: 0;
@@ -41,7 +41,6 @@
             border-radius: 5px;
             cursor: pointer;
             font-weight: 600;
-            transition: background 0.3s;
         }
         #loginBtn:hover, #postBtn:hover {
             background: #5649c0;
@@ -54,7 +53,6 @@
             margin-bottom: 10px;
             resize: vertical;
             min-height: 100px;
-            font-family: inherit;
         }
         .vibe {
             background: white;
@@ -83,20 +81,14 @@
         .reaction-count {
             font-size: 0.9rem;
         }
-        footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #666;
-            font-size: 0.9rem;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🌟 VIBE</h1>
+            <h1>🌟 Vibe Social</h1>
             <div id="authSection">
-                <button id="loginBtn">Se connecter</button>
+                <button id="loginBtn">Se connecter anonymement</button>
             </div>
         </header>
         <main>
@@ -104,11 +96,10 @@
                 <textarea id="vibeInput" placeholder="Partage ta Vibe... (max 200 caractères)"></textarea>
                 <button id="postBtn">Poster</button>
             </div>
-            <div id="vibesList"></div>
+            <div id="vibesList">
+                <p>Connecte-toi pour voir les Vibes !</p>
+            </div>
         </main>
-        <footer>
-            <p>Un réseau social éphémère - © 2025</p>
-        </footer>
     </div>
 
     <!-- Chargement des SDK Firebase -->
@@ -140,8 +131,44 @@
                     document.getElementById('vibeForm').style.display = 'block';
                     loadVibes();
                 })
-                .catch((error) => alert("Erreur : " + error.message));
+                .catch((error) => alert("Erreur de connexion : " + error.message));
         });
+
+        // Charger les Vibes en temps réel
+        function loadVibes() {
+            const now = new Date();
+            db.collection("vibes")
+                .where("expiresAt", ">", now)
+                .orderBy("timestamp", "desc")
+                .onSnapshot((snapshot) => {
+                    const vibesList = document.getElementById('vibesList');
+                    vibesList.innerHTML = '';
+                    if (snapshot.empty) {
+                        vibesList.innerHTML = '<p>Aucune Vibe pour le moment.</p>';
+                    } else {
+                        snapshot.forEach(doc => {
+                            const vibe = doc.data();
+                            const div = document.createElement('div');
+                            div.className = 'vibe';
+                            div.innerHTML = `
+                                <p>${vibe.text}</p>
+                                <div class="reactions">
+                                    <button class="reaction-btn" data-id="${doc.id}" data-reaction="😂">
+                                        😂 <span class="reaction-count">${vibe.reactions["😂"] || 0}</span>
+                                    </button>
+                                    <button class="reaction-btn" data-id="${doc.id}" data-reaction="🥺">
+                                        🥺 <span class="reaction-count">${vibe.reactions["🥺"] || 0}</span>
+                                    </button>
+                                    <button class="reaction-btn" data-id="${doc.id}" data-reaction="🔥">
+                                        🔥 <span class="reaction-count">${vibe.reactions["🔥"] || 0}</span>
+                                    </button>
+                                </div>
+                            `;
+                            vibesList.appendChild(div);
+                        });
+                    }
+                });
+        }
 
         // Poster une Vibe
         document.getElementById('postBtn').addEventListener('click', () => {
@@ -154,42 +181,10 @@
                 text: vibeText,
                 reactions: { "😂": 0, "🥺": 0, "🔥": 0 },
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                expiresAt: firebase.firestore.Timestamp.fromDate(new Date(Date.now() + 86400000)) // Expire après 24h
+                expiresAt: firebase.firestore.Timestamp.fromDate(new Date(Date.now() + 86400000))
             });
             document.getElementById('vibeInput').value = '';
         });
-
-        // Charger les Vibes en temps réel
-        function loadVibes() {
-            const now = new Date();
-            db.collection("vibes")
-                .where("expiresAt", ">", now)
-                .orderBy("timestamp", "desc")
-                .onSnapshot((snapshot) => {
-                    const vibesList = document.getElementById('vibesList');
-                    vibesList.innerHTML = '';
-                    snapshot.forEach(doc => {
-                        const vibe = doc.data();
-                        const div = document.createElement('div');
-                        div.className = 'vibe';
-                        div.innerHTML = `
-                            <p>${vibe.text}</p>
-                            <div class="reactions">
-                                <button class="reaction-btn" data-id="${doc.id}" data-reaction="😂">
-                                    😂 <span class="reaction-count">${vibe.reactions["😂"]}</span>
-                                </button>
-                                <button class="reaction-btn" data-id="${doc.id}" data-reaction="🥺">
-                                    🥺 <span class="reaction-count">${vibe.reactions["🥺"]}</span>
-                                </button>
-                                <button class="reaction-btn" data-id="${doc.id}" data-reaction="🔥">
-                                    🔥 <span class="reaction-count">${vibe.reactions["🔥"]}</span>
-                                </button>
-                            </div>
-                        `;
-                        vibesList.appendChild(div);
-                    });
-                });
-        }
 
         // Gérer les réactions
         document.addEventListener('click', (e) => {
@@ -201,15 +196,6 @@
                 });
             }
         });
-
-        // Nettoyer les Vibes expirées (toutes les 5 min)
-        setInterval(() => {
-            const now = new Date();
-            db.collection("vibes")
-                .where("expiresAt", "<=", now)
-                .get()
-                .then(snapshot => snapshot.forEach(doc => doc.ref.delete()));
-        }, 300000);
     </script>
 </body>
 </html>
