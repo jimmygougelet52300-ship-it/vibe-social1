@@ -1,0 +1,136 @@
+# Generate single-file cleaned-up HTML for Vibe Social
+html = """<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Vibe Social</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f2f3f5; margin:0; padding:20px; }
+    .container { max-width:850px; margin:0 auto; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 25px rgba(0,0,0,0.1);}
+    h1 { margin-top:0; }
+    textarea { width:100%; border-radius:8px; padding:10px; border:1px solid #ccc; }
+    button { background:#007bff; color:white; padding:10px 15px; border:none; border-radius:8px; cursor:pointer; }
+    button:hover { background:#005fcc; }
+    #vibeForm { display:none; margin-top:15px; }
+    .vibe { background:#fafafa; padding:12px; margin-bottom:12px; border-radius:10px; border:1px solid #e2e2e2; }
+    .reactions { margin-top:8px; }
+    .reaction-btn { background:white; border:1px solid #ccc; padding:5px 8px; border-radius:8px; margin-right:6px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔥 Vibe Social</h1>
+
+    <div id="authSection">
+      <p>Connexion anonyme :</p>
+      <button id="loginBtn">Se connecter</button>
+    </div>
+
+    <div id="vibeForm">
+      <textarea id="vibeInput" rows="3" placeholder="Écris ta vibe..."></textarea><br><br>
+      <button id="postBtn">Publier</button>
+    </div>
+
+    <h2>Vibes :</h2>
+    <div id="vibesList">Chargement...</div>
+  </div>
+
+  <!-- Firebase SDK v8 compatible avec ton code -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <script>
+  // Configuration Firebase
+  const firebaseConfig = {
+    apiKey: "AIzaSyBSub-toM_kSEjkZmVLX6zSBW2wd82yzTk",
+    authDomain: "vibe-social-ae49d.firebaseapp.com",
+    projectId: "vibe-social-ae49d",
+    storageBucket: "vibe-social-ae49d.appspot.com",
+    messagingSenderId: "386453480474",
+    appId: "1:386453480474:web:66e7a11a657dc10ef01da3"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // Auth listener
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      document.getElementById("authSection").style.display = "none";
+      document.getElementById("vibeForm").style.display = "block";
+      loadVibes();
+    }
+  });
+
+  // login anonyme
+  document.getElementById("loginBtn").onclick = () => {
+    auth.signInAnonymously().catch(err => alert(err.message));
+  };
+
+  // poster une vibe
+  document.getElementById("postBtn").onclick = async () => {
+    const text = document.getElementById("vibeInput").value.trim();
+    if (!text || text.length > 200) return alert("1 à 200 caractères !");
+    await db.collection("vibes").add({
+      text,
+      reactions: { "😂":0,"🥺":0,"🔥":0 },
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      expiresAt: firebase.firestore.Timestamp.fromDate(new Date(Date.now()+86400000))
+    });
+    document.getElementById("vibeInput").value = "";
+  };
+
+  // charger vibes
+  function loadVibes() {
+    const now = firebase.firestore.Timestamp.now();
+    db.collection("vibes")
+      .where("expiresAt", ">", now)
+      .orderBy("timestamp", "desc")
+      .onSnapshot(snap => {
+        const list = document.getElementById("vibesList");
+        list.innerHTML = "";
+        snap.forEach(doc => {
+          const v = doc.data();
+          const r = v.reactions || {"😂":0,"🥺":0,"🔥":0};
+          const div = document.createElement("div");
+          div.className = "vibe";
+          div.innerHTML = `
+            <p>${v.text}</p>
+            <div class="reactions">
+              <button class="reaction-btn" data-id="${doc.id}" data-r="😂">😂 ${r["😂"]}</button>
+              <button class="reaction-btn" data-id="${doc.id}" data-r="🥺">🥺 ${r["🥺"]}</button>
+              <button class="reaction-btn" data-id="${doc.id}" data-r="🔥">🔥 ${r["🔥"]}</button>
+            </div>
+          `;
+          list.appendChild(div);
+        });
+      });
+  }
+
+  // réactions
+  document.addEventListener("click", e => {
+    const btn = e.target.closest(".reaction-btn");
+    if (!btn) return;
+    db.collection("vibes").doc(btn.dataset.id).update({
+      ["reactions."+btn.dataset.r]: firebase.firestore.FieldValue.increment(1)
+    });
+  });
+
+  // nettoyage auto
+  setInterval(() => {
+    const now = firebase.firestore.Timestamp.now();
+    db.collection("vibes").where("expiresAt","<=",now).get()
+      .then(s=>s.forEach(d=>d.ref.delete()));
+  }, 300000);
+  </script>
+</body>
+</html>"""
+
+path = "/mnt/data/vibe-social-OPTION-A.html"
+with open(path, "w", encoding="utf-8") as f:
+    f.write(html)
+
+path
