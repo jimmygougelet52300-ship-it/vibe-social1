@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Vibe Social</title>
+  <style>
+    :root{--accent:#5b3fdb;--bg:#f6f7fb;--card:#ffffff;--text:#0f172a}
+    body{font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:20px}
+    .container{max-width:900px;margin:28px auto;background:var(--card);padding:20px;border-radius:12px;box-shadow:0 8px 30px rgba(16,24,40,0.06)}
+    header{display:flex;justify-content:space-between;align-items:center}
+    h1{margin:0;color:var(--accent)}
+    #authSection p{margin:6px 0 12px}
+    textarea, input {width:100%;padding:10px;border-radius:8px;border:1px solid #e6e9ef;box-sizing:border-box}
+    button{background:var(--accent);color:white;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+    .row{display:flex;gap:10px;align-items:center}
+    #vibesList{margin-top:18px}
+    .vibe{background:#fafbfd;padding:14px;border-radius:10px;border:1px solid #eef2ff;margin-bottom:12px}
+    .reactions{margin-top:10px;display:flex;gap:8px}
+    .reaction-btn{background:white;border:1px solid #e6e9ef;padding:6px 10px;border-radius:8px;cursor:pointer}
+    .small{font-size:13px;color:#6b7280}
+    .hidden{display:none}
+    .error{color:#b91c1c;background:#ffefef;padding:8px;border-radius:8px;margin-top:10px}
+  </style>
+  <!-- Using Firebase v8 compat SDK because code below uses v8 style (firebase.firestore.FieldValue...) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⭐ Vibe Social</h1>
+      <div id="status" class="small">Offline</div>
+    </header>
+
+    <section id="authSection">
+      <p>Connecte-toi pour voir et poster des Vibes !</p>
+      <div class="row">
+        <button id="loginBtn">Se connecter anonymement</button>
+        <div class="small" style="margin-left:8px">Connexion anonyme (test)</div>
+      </div>
+      <div id="authError" class="error hidden"></div>
+    </section>
+
+    <section id="vibeForm" class="hidden" aria-hidden="true">
+      <textarea id="vibeInput" rows="3" maxlength="200" placeholder="Écris ta vibe... (1-200 caractères)"></textarea>
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+        <button id="postBtn">Poster la Vibe</button>
+        <div class="small">Les Vibes expirent après 24h</div>
+      </div>
+      <div id="postError" class="error hidden"></div>
+    </section>
+
+    <h2 style="margin-top:20px">Vibes récentes</h2>
+    <div id="vibesList">Chargement...</div>
+  </div>
+
+<script>
+/* ========= Configuration Firebase (ne pas partager les secrets côté public si besoin) ========= */
+const firebaseConfig = {
+  apiKey: "AIzaSyBSub-toM_kSEjkZmVLX6zSBW2wd82yzTk",
+  authDomain: "vibe-social-ae49d.firebaseapp.com",
+  projectId: "vibe-social-ae49d",
+  storageBucket: "vibe-social-ae49d.appspot.com",
+  messagingSenderId: "386453480474",
+  appId: "1:386453480474:web:66e7a11a657dc10ef01da3"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+/* Utility: escape user content to avoid simple HTML injection */
+function escapeHtml(unsafe){
+  return String(unsafe || "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+/* UI helpers */
+const el = id => document.getElementById(id);
+const show = (id) => { el(id).classList.remove('hidden'); el(id).ariaHidden = "false"; }
+const hide = (id) => { el(id).classList.add('hidden'); el(id).ariaHidden = "true"; }
+const setError = (id, msg) => { if(!msg) hide(id); else { el(id).textContent = msg; el(id).classList.remove('hidden'); } }
+
+/* Auth flow */
+auth.onAuthStateChanged(user => {
+  if(user){
+    el('status').textContent = "Connecté";
+    hide('authSection');
+    show('vibeForm');
+    loadVibes(); // start realtime listener
+  } else {
+    el('status').textContent = "Déconnecté";
+    show('authSection');
+    hide('vibeForm');
+    el('vibesList').innerHTML = '<p class="small">Connecte-toi pour voir les vibes.</p>';
+  }
+});
+
+el('loginBtn').addEventListener('click', () => {
+  setError('authError', '');
+  auth.signInAnonymously().catch(err => {
+    console.error("Auth error:", err);
+    setError('authError', "Erreur d'authentification : " + err.message);
+  });
+});
+
+/* Posting a vibe */
+el('postBtn').addEventListener('click', async () => {
+  setError('postError', '');
+  const text = el('vibeInput').value.trim();
+  if(!text || text.length > 200) {
+    setError('postError', 'La Vibe doit faire entre 1 et 200 caractères.');
+    return;
+  }
+  try {
+    await db.collection('vibes').add({
+      text,
+      reactions: {"😂":0,"🥺":0,"🔥":0},
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      expiresAt: firebase.firestore.Timestamp.fromDate(new Date(Date.now() + 24*60*60*1000))
+    });
+    el('vibeInput').value = '';
+  } catch(err){
+    console.error("Post error:", err);
+    setError('postError', "Erreur lors de l'envoi : " + err.message);
+  }
+});
+
+/* Load vibes with correct types and ordering
+   - Use firebase.firestore.Timestamp.now() for comparisons
+   - When using an inequality on 'expiresAt', first orderBy must be on 'expiresAt'
+*/
+let unsubscribeVibes = null;
+function loadVibes(){
+  // detach previous listener if exists
+  if(unsubscribeVibes) unsubscribeVibes();
+
+  const now = firebase.firestore.Timestamp.now();
+  const query = db.collection('vibes')
+    .where('expiresAt', '>', now)
+    .orderBy('expiresAt', 'asc')   // required as first orderBy for inequality filter
+    .orderBy('timestamp', 'desc');
+
+  unsubscribeVibes = query.onSnapshot(snapshot => {
+    const list = el('vibesList');
+    list.innerHTML = '';
+    if(snapshot.empty){
+      list.innerHTML = '<p class="small">Aucune vibe disponible pour le moment.</p>';
+      return;
+    }
+    snapshot.forEach(doc => {
+      const v = doc.data();
+      const reactions = Object.assign({"😂":0,"🥺":0,"🔥":0}, v.reactions || {});
+      const card = document.createElement('div');
+      card.className = 'vibe';
+      card.innerHTML = `
+        <div><strong>${escapeHtml(v.text)}</strong></div>
+        <div class="small">Posté : ${v.timestamp && v.timestamp.toDate ? v.timestamp.toDate().toLocaleString() : 'il y a quelques instants'}</div>
+        <div class="reactions">
+          <button class="reaction-btn" data-id="${doc.id}" data-r="😂">😂 <span class="count">${reactions["😂"]}</span></button>
+          <button class="reaction-btn" data-id="${doc.id}" data-r="🥺">🥺 <span class="count">${reactions["🥺"]}</span></button>
+          <button class="reaction-btn" data-id="${doc.id}" data-r="🔥">🔥 <span class="count">${reactions["🔥"]}</span></button>
+        </div>
+      `;
+      list.appendChild(card);
+    });
+  }, err => {
+    console.error("Listener error:", err);
+    el('vibesList').innerHTML = '<p class="error">Erreur chargement des vibes : ' + escapeHtml(err.message) + '</p>';
+    // If error indicates missing index, provide hint
+    if(err && err.code && err.code.indexOf && err.code.indexOf('failed-precondition') !== -1){
+      console.warn("Possible missing index");
+    }
+  });
+}
+
+/* Reaction handler: use event delegation and closest() to support clicks on inner elements */
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.reaction-btn');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  const r = btn.dataset.r;
+  if(!id || !r) return;
+  try {
+    await db.collection('vibes').doc(id).update({
+      [`reactions.${r}`]: firebase.firestore.FieldValue.increment(1)
+    });
+    // Optimistically update UI count without waiting for snapshot
+    const span = btn.querySelector('.count');
+    if(span){
+      const n = parseInt(span.textContent||'0',10) + 1;
+      span.textContent = n;
+    }
+  } catch(err){
+    console.error("Reaction update error:", err);
+    alert("Impossible d'ajouter la réaction : " + (err.message || err));
+  }
+});
+
+/* Cleanup expired vibes - note: runs only while page open. For production use a scheduled Cloud Function */
+setInterval(async () => {
+  try {
+    const now = firebase.firestore.Timestamp.now();
+    const snapshot = await db.collection('vibes').where('expiresAt', '<=', now).get();
+    snapshot.forEach(doc => doc.ref.delete().catch(()=>{}));
+  } catch(e){
+    // ignore
+  }
+}, 5 * 60 * 1000);
+
+/* End of script */
+</script>
+</body>
+</html>
